@@ -1,0 +1,16 @@
+{
+  "name": "modernize",
+  "version": "0.0.1",
+  "description": "",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "node lib/index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^10.0.4",
+    "cli-progress": "^1.8.0",
+    "typescript": "^2.9.0-dev.20180509"
+  }
+}
