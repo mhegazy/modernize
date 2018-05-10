@@ -9,8 +9,12 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/cli-progress": "^1.8.0",
     "@types/node": "^10.0.4",
+    "@types/readline-sync": "^1.4.3",
     "cli-progress": "^1.8.0",
+    "readline-sync": "^1.4.9",
+    "types-registry": "^0.1.387",
     "typescript": "^2.9.0-dev.20180509"
   }
 }

@@ -17,14 +17,17 @@ export default {
         readDirectory: ts.sys.readDirectory,
     },
     createLanguageServiceHost(options: { compilerOptions: ts.CompilerOptions, projectDir: string, filesNames: string[] }) {
-        const files: Record<string, { name: string, version: number, contents:string }> = {};
+        const files: Record<string, { name: string, version: number, dirty: boolean, contents:string }> = {};
         options.filesNames.forEach(getOrAdd);
         const renames: { fileName: string, newFileName: string }[] = [];
 
         function getOrAdd(name: string) {
             if (!files[name]) {
                 files[name] = {
-                    name: name, version: 1, contents: fs.readFileSync(name).toString()
+                    name: name,
+                    version: 1,
+                    dirty: false,
+                    contents: fs.readFileSync(name).toString()
                 };
             }
             return files[name];
@@ -41,6 +44,7 @@ export default {
                 const entry = getOrAdd(fileName);
                 entry.contents = contents;
                 entry.version++;
+                entry.dirty = true;
                 progjectVersion++;
             },
             renameFile: (fileName: string, newFileName: string) => {
@@ -56,6 +60,7 @@ export default {
                 files[newFileName] = {
                     name: newFileName,
                     version: 1,
+                    dirty:  true,
                     contents: entry.contents
                 };
 
@@ -69,7 +74,10 @@ export default {
                 // }
 
                 for (const file of getFileNames()) {
-                    fs.writeFileSync(files[file].name, files[file].contents);
+                    if (files[file].dirty) {
+                        fs.writeFileSync(files[file].name, files[file].contents);
+                        files[file].dirty = false;
+                    }
                 }
             },
             getCompilationSettings: () => options.compilerOptions,

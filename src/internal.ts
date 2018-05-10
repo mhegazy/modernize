@@ -129,6 +129,16 @@ export declare class ChangeTracker {
 type ValidateNonFormattedText = (node: Node, text: string) => void;
 
 
+export declare enum PackageNameValidationResult {
+    Ok,
+    ScopedPackagesNotSupported,
+    EmptyName,
+    NameTooLong,
+    NameStartsWithDot,
+    NameStartsWithUnderscore,
+    NameContainsNonURISafeCharacters
+};
+
 
 interface TSInternal {
     generateTSConfig(options: ts.CompilerOptions, fileNames: ReadonlyArray<string>, newLine: string): string;
@@ -142,7 +152,8 @@ interface TSInternal {
             packageNameToTypingLocation: ts.ReadonlyMap<CachedTyping>,
             typeAcquisition: ts.TypeAcquisition,
             unresolvedImports: ReadonlyArray<string>,
-            typesRegistry: ts.ReadonlyMap<ts.MapLike<string>>): { cachedTypingPaths: string[], newTypingNames: string[], filesToWatch: string[] }
+            typesRegistry: ts.ReadonlyMap<ts.MapLike<string>>): { cachedTypingPaths: string[], newTypingNames: string[], filesToWatch: string[] };
+        validatePackageName(packageName: string): PackageNameValidationResult;
     },
     createMapFromTemplate<T>(template?: ts.MapLike<T>): ts.Map<T>;
     createMap<T>(): ts.Map<T>;

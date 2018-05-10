@@ -1,13 +1,17 @@
 import path from "path";
-import ts from "typescript";
+import ts, { LanguageService } from "typescript";
 import hosts from "./host";
-import tsinternal, { ChangeTracker } from "./internal";
+import tsinternal, { ChangeTracker, PackageNameValidationResult } from "./internal";
 import Progress from "cli-progress";
+import { execSync } from "child_process";
+import readlineSync from "readline-sync";
+
 
 type Options = {
     projectDir: string;
     include?: string[];
     exclude?: string[];
+    interactive?: boolean;
 };
 
 type LSHost = ReturnType<typeof hosts.createLanguageServiceHost>;
@@ -15,13 +19,14 @@ type LSHost = ReturnType<typeof hosts.createLanguageServiceHost>;
 const typesMapLocation = "C:/ls/typesMap.json";
 const formatCodeSettings = getDefaultFormatCodeSettings();
 const userPrefrences: ts.UserPreferences = { quotePreference: "double" };
+const errors: string[] = [];
 
-function addTypesPackages(options: Options, program: ts.Program) {
-
+function addTypesPackages(languageService: ts.LanguageService, _host: LSHost, options: Options) {
+    const program = languageService.getProgram();
     const ambientModules = program.getTypeChecker().getAmbientModules().map(mod => tsinternal.stripQuotes(mod.getName()));
     let unresolvedImports: string[] | undefined;
 
-    for (const sourceFile of program.getSourceFiles()) {
+    forEachSourceFile(`Find applicable @types pacakages`, languageService, sourceFile => {
         const resolvedModules = getResolvedModues(sourceFile);
         if (resolvedModules) {
             resolvedModules.forEach((resolvedModule, name) => {
@@ -41,23 +46,45 @@ function addTypesPackages(options: Options, program: ts.Program) {
                 }
             });
         }
-    }
+    });
+
+    const typesRegistry = tsinternal.createMapFromTemplate<ts.MapLike<string>>(require("types-registry").entries);
 
     const types = tsinternal.JsTyping.discoverTypings(
         hosts.typingResolutionHost,
-        console.log,
+        (_message) => { /* console.log(_message); */ },
         program.getSourceFiles().map(f => f.fileName),
         options.projectDir as ts.Path,
         tsinternal.createMapFromTemplate(ts.readConfigFile(typesMapLocation, hosts.typingResolutionHost.readFile).config!),
         tsinternal.createMap(),
         { enable: true },
         unresolvedImports || [],
-        tsinternal.createMap());
-    console.log("Found types ===> ");
-    console.log(JSON.stringify(types.newTypingNames, undefined, 2));
+        typesRegistry);
+
+    const typesToInstall = types.newTypingNames
+        .filter(t => tsinternal.JsTyping.validatePackageName(t) === 0 && typesRegistry.has(t))
+        .map(t => `@types/${t}`)
+        .join(" ");
+    // console.log("Found types ===> ");
+    // console.log(JSON.stringify(typesToInstall, undefined, 2));
+
+    console.log("# Running 'npm install'...")
+    runCommandSync("npm install --save-dev " + typesToInstall, options.projectDir);
 
     function getResolvedModues(file: ts.SourceFile): ts.Map<ts.ResolvedModuleFull | undefined> {
         return (file as any).resolvedModules
+    }
+
+    function runCommandSync(command: string, projectDir: string) {
+        try {
+            execSync(command, { cwd: projectDir, encoding: "utf-8" });
+        }
+        catch (error) {
+            const { stdout, stderr } = error;
+            console.log(`[Error] Failed. stdout:${stdout}\n    stderr:${stderr}`);
+            return false;
+        }
+        return true;
     }
 }
 
@@ -74,12 +101,11 @@ function padRight(s: string, length: number) {
 
 function forEachSourceFile(message: string, languageService: ts.LanguageService, action: (s: ts.SourceFile) => void) {
     const sourceFiles = getSourceFiles(languageService);
-    const tag = padRight(message, 30);
+    const tag = padRight(message, 50);
     const bar = new Progress.Bar({
         format: `# ${tag} [{bar}] {percentage}% | {value}/{total}`,
         barCompleteChar: '#',
     }, Progress.Presets.shades_classic);
-    const errors: string[] = [];
     bar.start(sourceFiles.length, 0);
     for (let i = 0; i < sourceFiles.length; i++) {
         bar.update(i);
@@ -87,28 +113,44 @@ function forEachSourceFile(message: string, languageService: ts.LanguageService,
             action(sourceFiles[i]);
         }
         catch (e) {
-           errors.push(`-------------------> [Error] File ${sourceFiles[i].fileName}: Failed to get code actions:\n ${e}`);
+           errors.push(`[Error in '${message}'] File ${sourceFiles[i].fileName}:\n ${e.message} \n ${e.stack}\n`);
         }
     }
     bar.stop();
-    // errors.forEach(console.log);
 }
 
 function convertToESModules(languageService: ts.LanguageService, host: LSHost) {
-    applyQuickFixes(tsinternal.Diagnostics.File_is_a_CommonJS_module_it_may_be_converted_to_an_ES6_module.code, languageService, host);
+    applyQuickFixes("Convert CJS modules to ES modules", [tsinternal.Diagnostics.File_is_a_CommonJS_module_it_may_be_converted_to_an_ES6_module.code], languageService, host);
 }
 
 function convertConstructorFunctionsToESClasses(languageService: ts.LanguageService, host: LSHost) {
-    applyQuickFixes(tsinternal.Diagnostics.This_constructor_function_may_be_converted_to_a_class_declaration.code, languageService, host);
+    applyQuickFixes("Convert constructor functions to ES classes", [tsinternal.Diagnostics.This_constructor_function_may_be_converted_to_a_class_declaration.code], languageService, host);
 }
 
-function applyQuickFixes(diagnosticMessageCode: number, languageService: ts.LanguageService, host: LSHost) {
-    forEachSourceFile(`Applying quickfix for ${diagnosticMessageCode}`, languageService, sourceFile => {
+function convertJSDocToTypeAnnoatations(languageService: ts.LanguageService, host: LSHost) {
+    applyQuickFixes("Convert JSDoc types to TS types", [tsinternal.Diagnostics.JSDoc_types_may_be_moved_to_TypeScript_types.code], languageService, host);
+}
+
+function inferTypeAnnoatations(languageService: ts.LanguageService, host: LSHost) {
+    applyQuickFixes("Infer types from usage", [
+        tsinternal.Diagnostics.Variable_0_implicitly_has_type_1_in_some_locations_where_its_type_cannot_be_determined.code,
+        tsinternal.Diagnostics.Variable_0_implicitly_has_an_1_type.code,
+        tsinternal.Diagnostics.Parameter_0_implicitly_has_an_1_type.code,
+        tsinternal.Diagnostics.Rest_parameter_0_implicitly_has_an_any_type.code,
+        tsinternal.Diagnostics.Property_0_implicitly_has_type_any_because_its_get_accessor_lacks_a_return_type_annotation.code,
+        tsinternal.Diagnostics._0_which_lacks_return_type_annotation_implicitly_has_an_1_return_type.code,
+        tsinternal.Diagnostics.Property_0_implicitly_has_type_any_because_its_set_accessor_lacks_a_parameter_type_annotation.code,
+        tsinternal.Diagnostics.Member_0_implicitly_has_an_1_type.code
+    ], languageService, host);
+}
+
+function applyQuickFixes(message: string, diagnosticMessageCodes: number[], languageService: ts.LanguageService, host: LSHost) {
+    forEachSourceFile(`${message}`, languageService, sourceFile => {
         const diagnostics = [
             ...languageService.getSyntacticDiagnostics(sourceFile.fileName),
             ...languageService.getSemanticDiagnostics(sourceFile.fileName),
             ...languageService.getSuggestionDiagnostics(sourceFile.fileName)
-        ].filter(d => d.code === diagnosticMessageCode);
+        ].filter(d => diagnosticMessageCodes.includes(d.code));
 
         for (const diagnostic of diagnostics) {
             const fileName = diagnostic.file!.fileName;
@@ -136,7 +178,7 @@ function applyTextChanges(text: string, textChanges: ReadonlyArray<ts.TextChange
 }
 
 function fixMissingPropertyDeclarations(languageService: ts.LanguageService, host: LSHost) {
-    applyQuickFixes(tsinternal.Diagnostics.Property_0_does_not_exist_on_type_1.code, languageService, host);
+    applyQuickFixes("Add missing property declarations", [tsinternal.Diagnostics.Property_0_does_not_exist_on_type_1.code], languageService, host);
 }
 
 function generatePropertyDeclarationsForESClasses(languageService: ts.LanguageService, host: LSHost) {
@@ -156,13 +198,10 @@ function generatePropertyDeclarationsForESClasses(languageService: ts.LanguageSe
     });
 
     function addPropertyDeclarations(sourceFile: ts.SourceFile, node: ts.ClassLikeDeclaration, changeTracker: ChangeTracker) {
-        if (ts.isClassExpression(node)) {
-            throw new Error ("Found class expression, skipping");
-        }
         //  console.log(`--------------------> Processing class ${ts.getNameOfDeclaration(node)!.getText()}`);
-        const symbol = checker.getSymbolAtLocation(node.name!);
+        const symbol: ts.Symbol = ts.isClassDeclaration(node) ? checker.getSymbolAtLocation(node.name!) : (node as any).symbol;
         if (!symbol) {
-            throw new Error("No Symbol!!!");
+            throw new Error("addPropertyDeclarations: No Symbol!!!");
         }
 
         // all instance members are stored in the "member" array of symbol
@@ -264,8 +303,11 @@ function getInitialConfiguration(options: Options) {
     return config;
 }
 
-function generateConfigFile(options: Options, host: LSHost) {
-    const contents = tsinternal.generateTSConfig({}, [], ts.sys.newLine);
+function generateConfigFile(_languageService: ts.LanguageService, host: LSHost, options: Options) {
+    const contents = tsinternal.generateTSConfig({
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.CommonJS
+    }, [], ts.sys.newLine);
     const fileName = path.resolve(options.projectDir, "tsconfig.json");
     host.setFileText(fileName, contents);
     console.log("# Generating tsconfig.json file");
@@ -286,40 +328,56 @@ function modernize(options: Options) {
     console.log(`# Found ${getSourceFiles(languageService).length} files`);
     // console.log(JSON.stringify(program.getSourceFiles().map(f => f.fileName), undefined, 2));
 
-    // addTypesPackages(options, program);
+    const actions = [
+        addTypesPackages,
+        convertToESModules,
+        convertConstructorFunctionsToESClasses,
+        generatePropertyDeclarationsForESClasses,
 
-    convertToESModules(languageService, lshost);
+        // Style
+        format,
+        organizeImports,
 
-    convertConstructorFunctionsToESClasses(languageService, lshost);
+        // Rename files to .ts
+        renameFiles,
 
-    generatePropertyDeclarationsForESClasses(languageService, lshost);
+        fixMissingPropertyDeclarations,
 
-    fixMissingPropertyDeclarations(languageService, lshost);
+        convertJSDocToTypeAnnoatations,
 
-    // convertJSDocToTypeAnnoatations(languageService, lshost);
-    // inferTypeAnnoatations(languageService, lshost)
+        inferTypeAnnoatations,
 
-    // Style
-    format(languageService, lshost);
-    organizeImports(languageService, lshost);
+        // lint
+        // convert var to let/cosnt
+        // conver function expressions to lambdas
+        // convert string concat to string templates
 
-    // Others
-    // convert var to let/cosnt
-    // conver function expressions to lambdas
-    // convert string concat to string templates
-    // convert string/array `.indexof(...) > 0` to `includes(...)`
-    // convert for to for..of when applicable
-    // convert callback to promses or async/await
+        // others
+        // convert string/array `.indexof(...) > 0` to `includes(...)`
+        // convert for to for..of when applicable
+        // convert callback to promses or async/await
 
-    // Rename files to .ts
-    renameFiles(languageService, lshost);
+        // Generate tsconfig.json file
+        generateConfigFile,
+    ];
 
-    // Generate tsconfig.json file
-    generateConfigFile(options, lshost);
+    actions.forEach(doAction);
 
-    // Write all edits
-    console.log("# Writing changes");
-    lshost.writeEdits();
+
+    function doAction(action: (languageService: LanguageService, host: LSHost, options: Options) => void) {
+        action(languageService, lshost, options);
+
+        // Write all edits
+        console.log("  Writing changes");
+        lshost.writeEdits();
+        if (options.interactive) {
+            const answer: string = readlineSync.question("  Do you wish to continue (Y|N)?");
+            if (answer.startsWith("n") || answer.startsWith("N")) {
+                process.exit(1);
+            }
+        }
+        console.log();
+    }
 }
 
 
@@ -328,6 +386,9 @@ modernize({
     include: [
         "declarations.d.ts",
         "bin/*.js",
-        "lib/**/*.js"
-    ]
+        "lib/**/*.js",
+        //"test/**/*.js"
+    ],
+    interactive: true
 });
+errors.forEach(e => console.error(e));
