@@ -18,7 +18,7 @@ const actions = [
     generatePropertyDeclarationsForESClasses,
 
     // Style
-    // format,
+    format,
     organizeImports,
 
     // Rename files to .ts
@@ -52,7 +52,8 @@ function createProject(options: Options) {
             allowJs: true,
             checkJs: true,
             target: "ESNext",
-            module: "node"
+            module: "node",
+            jsx: "react"
         }
     };
     if (options.include) intialConfig.include = options.include;
@@ -127,8 +128,9 @@ function modernize(options: Options) {
 
 modernize({
     projectDir: "C:\\clones\\modernize\\tests\\pluralsight-course-react-aspnet-core\\m6-add-rest-data-to-server-side-rendering\\reactapp",
-    //interactive: true,
+    interactive: true,
     "exclude": [
         "build"
     ]
 });
+
