@@ -57,11 +57,25 @@ export function noop() {
 }
 
 export function applyTextChanges(text: string, textChanges: ReadonlyArray<ts.TextChange>): string {
+    // for (let i = textChanges.length - 1; i >= 0; i--) {
+    //     const { newText, span: { start, length } } = textChanges[i];
+    //     text = text.slice(0, start) + newText + text.slice(start + length);
+    // }
+    // return text;
+
+    const parts: string[] = [];
+    let end = text.length;
+    textChanges.slice().sort((a, b) => a.span.start > b.span.start ? 1 : -1);
     for (let i = textChanges.length - 1; i >= 0; i--) {
         const { newText, span: { start, length } } = textChanges[i];
-        text = text.slice(0, start) + newText + text.slice(start + length);
+        if (start + length !== end)
+            parts.push(text.substring(start + length, end));
+        if (newText)
+            parts.push(newText);
+        end = start;
     }
-    return text;
+    parts.push(text.substring(0, end));
+    return parts.reverse().join("");
 }
 
 export function applyFileTextChanges(project: Project, edits: ReadonlyArray<ts.FileTextChanges>): void {
