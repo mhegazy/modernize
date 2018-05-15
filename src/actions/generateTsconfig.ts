@@ -3,7 +3,7 @@ import ts from "typescript";
 import tsinternal from "../internal";
 import Project from "../project";
 import { Options } from "../types";
-import { getSourceFiles, containsJsxSyntax } from "../helpers";
+import { getSourceFiles, containsJsxSyntax, containsDecorators } from "../helpers";
 
 export function generateConfigFile(project: Project, options: Options) {
     const config: ts.CompilerOptions = {
@@ -11,8 +11,14 @@ export function generateConfigFile(project: Project, options: Options) {
         module: ts.ModuleKind.CommonJS
     };
 
-    if (getSourceFiles(project.getLanguageService()).find(containsJsxSyntax)) {
+    const sourceFiles = getSourceFiles(project.getLanguageService());
+
+    if (sourceFiles.find(containsJsxSyntax)) {
         config.jsx = ts.JsxEmit.React;
+    }
+
+    if (sourceFiles.find(containsDecorators)) {
+        config.experimentalDecorators = true;
     }
 
     const contents = tsinternal.generateTSConfig(config, [], ts.sys.newLine);
