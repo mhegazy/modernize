@@ -236,6 +236,7 @@ interface TSInternal {
             unresolvedImports: ReadonlyArray<string>,
             typesRegistry: ts.ReadonlyMap<ts.MapLike<string>>): { cachedTypingPaths: string[], newTypingNames: string[], filesToWatch: string[] };
         validatePackageName(packageName: string): PackageNameValidationResult;
+        nodeCoreModuleList: ReadonlyArray<string>;
     },
     createMapFromTemplate<T>(template?: ts.MapLike<T>): ts.Map<T>;
     createMap<T>(): ts.Map<T>;
