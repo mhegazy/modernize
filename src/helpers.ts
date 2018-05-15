@@ -66,6 +66,16 @@ export function applyTextChanges(text: string, textChanges: ReadonlyArray<ts.Tex
     const parts: string[] = [];
     let end = text.length;
     textChanges.slice().sort((a, b) => a.span.start > b.span.start ? 1 : -1);
+
+    for (let i = 0; i < textChanges.length; i++) {
+        for (let j = i + 1; j < textChanges.length; j++) {
+            if (ts.textSpanOverlap(textChanges[i].span, textChanges[j].span)) {
+                console.log("spans overlap");
+                debugger;
+            }
+        }
+    }
+
     for (let i = textChanges.length - 1; i >= 0; i--) {
         const { newText, span: { start, length } } = textChanges[i];
         if (start + length !== end)
@@ -79,11 +89,18 @@ export function applyTextChanges(text: string, textChanges: ReadonlyArray<ts.Tex
 }
 
 export function applyFileTextChanges(project: Project, edits: ReadonlyArray<ts.FileTextChanges>): void {
+    const fileTextChanges: Record<string, ts.TextChange[]> = {};
     for (const { fileName, textChanges } of edits) {
-        project.setFileText(fileName, applyTextChanges(project.getFileText(fileName), textChanges));
+        (fileTextChanges[fileName] || (fileTextChanges[fileName] = [])).push(...textChanges);
     }
+    Object.getOwnPropertyNames(fileTextChanges).forEach(f =>
+        project.setFileText(f, applyTextChanges(project.getFileText(f), fileTextChanges[f])));
 }
 
 export function containsJsxSyntax(sourceFile: SourceFile) {
     return ((sourceFile as any).transformFlags & TransformFlags.ContainsJsx) !== 0;
+}
+
+export function containsDecorators(sourceFile: SourceFile) {
+    return ((sourceFile as any).transformFlags & TransformFlags.ContainsDecorators) !== 0;
 }
