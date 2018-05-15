@@ -70,7 +70,7 @@ export function addTypesPackages(project: Project, options: Options) {
     console.log("# Running 'npm install'...")
     runCommandSync("npm install --save-dev " + typesToInstall.join(" "), options.projectDir);
 
-    if (missingTypes) {
+    if (missingTypes && missingTypes.length) {
         console.log(`# Found ${missingTypes.length} packages missing from @types`);
         if (options.interactive) {
             question("   Press (L) to list the packages, (C) to continue..", {
