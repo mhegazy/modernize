@@ -4,7 +4,7 @@ import { execSync } from "child_process";
 import ts from "typescript";
 import tsinternal from "../internal";
 import { typingResolutionHost } from "../host";
-import { forEachSourceFile } from "../helpers";
+import { forEachSourceFile, question, noop } from "../helpers";
 
 const typesMapLocation = "C:/ls/typesMap.json";
 
@@ -14,7 +14,7 @@ export function addTypesPackages(project: Project, options: Options) {
     const ambientModules = program.getTypeChecker().getAmbientModules().map(mod => tsinternal.stripQuotes(mod.getName()));
     let unresolvedImports: string[] | undefined;
 
-    forEachSourceFile(`Find applicable @types pacakages`, languageService, sourceFile => {
+    forEachSourceFile(`Looking for needed @types pacakages`, languageService, sourceFile => {
         const resolvedModules = getResolvedModues(sourceFile);
         if (resolvedModules) {
             resolvedModules.forEach((resolvedModule, name) => {
@@ -51,27 +51,49 @@ export function addTypesPackages(project: Project, options: Options) {
 
     const typesToInstall = types.newTypingNames
         .filter(t => tsinternal.JsTyping.validatePackageName(t) === 0 && typesRegistry.has(t))
-        .map(t => `@types/${t}`)
-        .join(" ");
-    // console.log("Found types ===> ");
-    // console.log(JSON.stringify(typesToInstall, undefined, 2));
+        .map(t => `@types/${t}`);
+
+    const missingTypes = unresolvedImports ? types.newTypingNames
+        .filter(t => tsinternal.JsTyping.validatePackageName(t) === 0 &&
+            !typesRegistry.has(t) &&
+            unresolvedImports!.includes(t) &&
+            !tsinternal.JsTyping.nodeCoreModuleList.includes(t)) : undefined;
+
+    console.log(`# Found ${typesToInstall.length} packages`);
+    if (options.interactive) {
+        question("   Press (L) to list the packages, (C) to continue..", {
+            "L": () => typesToInstall.forEach(p => console.log(`   - ${p}`)),
+            "C": noop
+        });
+    }
 
     console.log("# Running 'npm install'...")
-    runCommandSync("npm install --save-dev " + typesToInstall, options.projectDir);
+    runCommandSync("npm install --save-dev " + typesToInstall.join(" "), options.projectDir);
 
-    function getResolvedModues(file: ts.SourceFile): ts.Map<ts.ResolvedModuleFull | undefined> {
-        return (file as any).resolvedModules
+    if (missingTypes) {
+        console.log(`# Found ${missingTypes.length} packages missing from @types`);
+        if (options.interactive) {
+            question("   Press (L) to list the packages, (C) to continue..", {
+                "L": () => missingTypes.forEach(p => console.log(`   - ${p}`)),
+                "C": noop
+            });
+        }
+        // TODO: call dts-gen for each one of the missing packages, and add a typesRoot
     }
+}
 
-    function runCommandSync(command: string, projectDir: string) {
-        try {
-            execSync(command, { cwd: projectDir, encoding: "utf-8" });
-        }
-        catch (error) {
-            const { stdout, stderr } = error;
-            console.log(`[Error] Failed. stdout:${stdout}\n    stderr:${stderr}`);
-            return false;
-        }
-        return true;
+function getResolvedModues(file: ts.SourceFile): ts.Map<ts.ResolvedModuleFull | undefined> {
+    return (file as any).resolvedModules
+}
+
+function runCommandSync(command: string, projectDir: string) {
+    try {
+        execSync(command, { cwd: projectDir, encoding: "utf-8" });
     }
+    catch (error) {
+        const { stdout, stderr } = error;
+        console.log(`[Error] Failed. stdout:${stdout}\n    stderr:${stderr}`);
+        return false;
+    }
+    return true;
 }
