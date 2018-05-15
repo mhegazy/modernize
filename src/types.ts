@@ -3,4 +3,5 @@ export type Options = {
     include?: string[];
     exclude?: string[];
     interactive?: boolean;
+    verify?: boolean;
 };

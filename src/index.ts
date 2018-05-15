@@ -6,7 +6,7 @@ import { generatePropertyDeclarationsForESClasses } from "./actions/generateMiss
 import { generateConfigFile } from "./actions/generateTsconfig";
 import { organizeImports } from "./actions/origanizeImports";
 import { renameFiles } from "./actions/rename";
-import { exit, getSourceFiles, noop, question } from "./helpers";
+import { exit, getSourceFiles, noop, question, forEachSourceFile } from "./helpers";
 import { parseConfigHost } from "./host";
 import Project from "./project";
 import { Options } from "./types";
@@ -53,7 +53,8 @@ function createProject(options: Options) {
             checkJs: true,
             target: "ESNext",
             module: "node",
-            jsx: "react"
+            jsx: "react",
+            experimentalDecorators: true,
         }
     };
     if (options.include) intialConfig.include = options.include;
@@ -95,11 +96,30 @@ function modernize(options: Options) {
         console.log("  Writing changes");
         project.writeEdits();
 
+        if (options.verify)
+            verifyAction(project);
+
         if (options.interactive) {
             question("  Do you wish to continue (Y|N)?", { "N": exit, "Y": noop });
         }
 
         console.log();
+    });
+}
+
+function verifyAction(project: Project) {
+    const languageService = project.getLanguageService();
+    forEachSourceFile("Verifing ...", languageService, (sourceFile) => {
+        let diag = languageService.getSyntacticDiagnostics(sourceFile.fileName);
+        diag = diag.filter(d => !ts.flattenDiagnosticMessageText(d.messageText, ts.sys.newLine).endsWith("in a .ts file."));
+        if (diag.length) {
+            console.log("> Syntactic errors");
+            diag.slice(0, 10).forEach(d => {
+                const { line, character } = ts.getLineAndCharacterOfPosition(d.file!, d.start!);
+                console.log(`  => ${d.code} - ${d.file!.fileName} (${line}, ${character}): ${d.messageText}`);
+            });
+            debugger;
+        }
     });
 }
 
@@ -128,9 +148,11 @@ function modernize(options: Options) {
 
 modernize({
     projectDir: "C:\\clones\\modernize\\tests\\pluralsight-course-react-aspnet-core\\m6-add-rest-data-to-server-side-rendering\\reactapp",
-    interactive: true,
+    //interactive: true,
+    verify: true,
     "exclude": [
-        "build"
+        "build",
+        "public\\clientbundle.js"
     ]
 });
 
